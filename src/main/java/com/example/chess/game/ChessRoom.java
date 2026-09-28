@@ -16,7 +16,7 @@ import java.util.Map;
  */
 public class ChessRoom {
     private static final Logger log = LoggerFactory.getLogger(ChessRoom.class);
-    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final ChessEngine engine = new ChessEngine();
     private final WebSocketSession[] seats = new WebSocketSession[2]; // 0 = WHITE, 1 = BLACK
@@ -33,8 +33,8 @@ public class ChessRoom {
     public synchronized void handle(int seat, String text) {
         if (closed) return;
         try {
-            JsonNode m = JSON.readTree(text);
-            switch (m.path("t").asText()) {
+            JsonNode m = objectMapper.readTree(text);
+            switch (m.path("t").asString()) {
                 case "select" -> {
                     // Selection highlight is cosmetic: relay to the opponent, but only from the side to move.
                     int r = m.path("r").asInt(-2), c = m.path("c").asInt(-2);
@@ -79,7 +79,7 @@ public class ChessRoom {
             s.put("status", engine.status().name());
             s.put("winner", engine.winner());
             s.put("last", engine.lastMove());
-            String json = JSON.writeValueAsString(s);
+            String json = objectMapper.writeValueAsString(s);
             send(0, json);
             send(1, json);
         } catch (Exception e) {
@@ -89,7 +89,7 @@ public class ChessRoom {
 
     private void sendError(int seat, String msg) {
         try {
-            send(seat, JSON.writeValueAsString(Map.of("t", "error", "msg", msg)));
+            send(seat, objectMapper.writeValueAsString(Map.of("t", "error", "msg", msg)));
         } catch (Exception e) {
             log.debug("Error message failed: {}", e.toString());
         }

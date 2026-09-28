@@ -3,6 +3,11 @@ package com.example.chess.game;
 import java.util.ArrayList;
 import java.util.List;
 
+import static com.example.chess.game.Status.CHECK;
+import static com.example.chess.game.Status.CHECKMATE;
+import static com.example.chess.game.Status.NORMAL;
+import static com.example.chess.game.Status.STALEMATE;
+
 /**
  * Pure chess model. Row 0 is Black's back rank, row 7 is White's (same as the JavaFX version).
  * Pieces are chars: uppercase = White (KQRBNP), lowercase = Black, '.' = empty.
@@ -11,7 +16,6 @@ import java.util.List;
  * Not thread-safe by itself; ChessRoom serialises access.
  */
 public class ChessEngine {
-    public enum Status {NORMAL, CHECK, CHECKMATE, STALEMATE}
 
     private static final String[] START = {
             "rnbqkbnr", "pppppppp", "........", "........",
@@ -32,7 +36,7 @@ public class ChessEngine {
         for (int r = 0; r < 8; r++) b[r] = START[r].toCharArray();
         whiteTurn = true;
         wKingMoved = wRookAMoved = wRookHMoved = bKingMoved = bRookAMoved = bRookHMoved = false;
-        status = Status.NORMAL;
+        status = NORMAL;
         winner = null;
         lastMove = null;
     }
@@ -55,7 +59,7 @@ public class ChessEngine {
     }
 
     public boolean isOver() {
-        return status == Status.CHECKMATE || status == Status.STALEMATE;
+        return status == CHECKMATE || status == STALEMATE;
     }
 
     public List<String> rows() {
@@ -100,9 +104,9 @@ public class ChessEngine {
 
         boolean inCheck = kingInCheck(whiteTurn);
         boolean hasMove = anyLegalMove(whiteTurn);
-        status = inCheck ? (hasMove ? Status.CHECK : Status.CHECKMATE)
-                : (hasMove ? Status.NORMAL : Status.STALEMATE);
-        if (status == Status.CHECKMATE) winner = white ? "WHITE" : "BLACK";
+        status = inCheck ? (hasMove ? CHECK : CHECKMATE)
+                : (hasMove ? NORMAL : STALEMATE);
+        if (status == CHECKMATE) winner = white ? "WHITE" : "BLACK";
         return null;
     }
 
