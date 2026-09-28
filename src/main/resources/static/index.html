@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Networked Chess</title>
+    <style>
+        :root {
+            --sq: min(88px, 11.5vmin);
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: #2b2b2b;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+        }
+
+        #status {
+            width: calc(var(--sq) * 8);
+            box-sizing: border-box;
+            padding: 16px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: 700;
+            background: #555;
+            transition: background .2s;
+        }
+
+        #status.mine {
+            background: #4CAF50;
+            box-shadow: 0 0 10px rgba(76, 175, 80, .6);
+        }
+
+        #status.theirs {
+            background: #607D8B;
+        }
+
+        #status.check {
+            background: #f0ad4e;
+        }
+
+        #status.over {
+            background: #d9534f;
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns:repeat(8, var(--sq));
+            grid-template-rows:repeat(8, var(--sq));
+        }
+
+        .sq {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: calc(var(--sq) * .78);
+            line-height: 1;
+            user-select: none;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .light {
+            background: #f0d9b5;
+        }
+
+        .dark {
+            background: #b58863;
+        }
+
+        .sq.last {
+            box-shadow: inset 0 0 0 4px rgba(255, 235, 59, .55);
+        }
+
+        .sq.opp {
+            background: #aec6cf;
+        }
+
+        .sq.sel {
+            background: #7b9c50;
+        }
+
+        .sq.incheck {
+            background: #e57373;
+        }
+
+        .w {
+            color: #fff;
+            text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 3px #000;
+        }
+
+        .k {
+            color: #111;
+            text-shadow: 0 0 1px #fff3;
+        }
+
+        button {
+            display: none;
+            background: #e94560;
+            color: #fff;
+            border: 0;
+            padding: 10px 22px;
+            border-radius: 8px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+<div id="status">Connecting to server...</div>
+<div id="board"></div>
+<button id="again">Play again</button>
+
+<script>
+    // Server sends pieces as letters (uppercase = White). Filled glyphs are used for both sides and
+    // coloured with CSS; U+FE0E forces text (not emoji) rendering of the pawn.
+    const GLYPH = {k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟\uFE0E'};
+    const $ = id => document.getElementById(id);
+    let ws, color = null, S = null;
+    let sel = null, oppSel = null, notice = null;
+
+    function connect() {
+        ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chess');
+        ws.onopen = () => setStatus('Waiting for an opponent...', '');
+        ws.onclose = () => setStatus('Disconnected - reload to reconnect', 'over');
+        ws.onmessage = ev => {
+            const m = JSON.parse(ev.data);
+            switch (m.t) {
+                case 'welcome':
+                    color = m.color;
+                    render();
+                    break;
+                case 'wait':
+                    setStatus('Waiting for an opponent...', '');
+                    break;
+                case 'left':
+                    S = S && {...S, status: 'LEFT'};
+                    setStatus('Opponent disconnected.', 'over');
+                    break;
+                case 'state':
+                    S = m;
+                    sel = oppSel = notice = null;
+                    render();
+                    break;
+                case 'select':
+                    oppSel = m.r === -1 ? null : [m.r, m.c];
+                    render();
+                    break;
+                case 'error':
+                    notice = m.msg;
+                    render();
+                    break;
+            }
+        };
+    }
+
+    const send = o => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
+    const setStatus = (t, cls) => {
+        $('status').textContent = t;
+        $('status').className = cls;
+    };
+
+    const pieceAt = (r, c) => S.board[r][c];
+    const isMine = ch => ch !== '.' && (ch === ch.toUpperCase()) === (color === 'WHITE');
+    const myTurn = () => S && color && S.turn === color && !['CHECKMATE', 'STALEMATE', 'LEFT'].includes(S.status);
+
+    function onClick(r, c) {
+        if (!S || !color) return;
+        if (['CHECKMATE', 'STALEMATE', 'LEFT'].includes(S.status)) return;
+        if (!myTurn()) {
+            notice = "Wait for your opponent's move.";
+            return render();
+        }
+        notice = null;
+        const ch = pieceAt(r, c);
+
+        if (!sel) {
+            if (!isMine(ch)) {
+                notice = ch === '.' ? 'Select one of your pieces.' : 'You cannot move your opponent\'s piece.';
+                return render();
+            }
+            sel = [r, c];
+            send({t: 'select', r, c});
+            return render();
+        }
+        if (sel[0] === r && sel[1] === c) {
+            sel = null;
+            send({t: 'select', r: -1, c: -1});
+            return render();
+        }
+        if (isMine(ch)) {
+            sel = [r, c];
+            send({t: 'select', r, c});
+            return render();
+        }
+
+        // Anything else is a move attempt; the server is the judge and replies with a new state or an error.
+        send({t: 'move', sr: sel[0], sc: sel[1], tr: r, tc: c});
+    }
+
+    function render() {
+        const board = $('board');
+        board.innerHTML = '';
+        if (!S) return;
+        const flip = color === 'BLACK';
+        const inCheckKing = (S.status === 'CHECK' || S.status === 'CHECKMATE') ? findKing(S.turn === 'WHITE') : null;
+
+        for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) {
+            const r = flip ? 7 - i : i, c = flip ? 7 - j : j;
+            const ch = pieceAt(r, c);
+            const d = document.createElement('div');
+            d.className = 'sq ' + ((r + c) % 2 === 0 ? 'light' : 'dark');
+            if (S.last && ((S.last[0] === r && S.last[1] === c) || (S.last[2] === r && S.last[3] === c))) d.classList.add('last');
+            if (oppSel && oppSel[0] === r && oppSel[1] === c) d.classList.add('opp');
+            if (inCheckKing && inCheckKing[0] === r && inCheckKing[1] === c) d.classList.add('incheck');
+            if (sel && sel[0] === r && sel[1] === c) d.classList.add('sel');
+            if (ch !== '.') {
+                const span = document.createElement('span');
+                span.textContent = GLYPH[ch.toLowerCase()];
+                span.className = ch === ch.toUpperCase() ? 'w' : 'k';
+                d.appendChild(span);
+            }
+            d.onclick = () => onClick(r, c);
+            board.appendChild(d);
+        }
+        renderStatus();
+    }
+
+    function findKing(white) {
+        const k = white ? 'K' : 'k';
+        for (let r = 0; r < 8; r++) {
+            const c = S.board[r].indexOf(k);
+            if (c >= 0) return [r, c];
+        }
+        return null;
+    }
+
+    function renderStatus() {
+        const over = S.status === 'CHECKMATE' || S.status === 'STALEMATE';
+        $('again').style.display = over ? 'inline-block' : 'none';
+        if (S.status === 'CHECKMATE') return setStatus(`CHECKMATE! ${cap(S.winner)} wins.`, 'over');
+        if (S.status === 'STALEMATE') return setStatus('STALEMATE! Draw.', 'over');
+        if (notice) return setStatus(notice, myTurn() ? 'mine' : 'theirs');
+        const side = cap(S.turn);
+        if (S.status === 'CHECK') return setStatus(`${side} is in CHECK!` + (myTurn() ? ' Your move.' : ''), 'check');
+        if (myTurn()) return setStatus(`⭐ YOUR TURN (${cap(color)}) ⭐`, 'mine');
+        setStatus(`⏳ OPPONENT'S TURN (${side}) ⏳`, 'theirs');
+    }
+
+    const cap = s => s.charAt(0) + s.slice(1).toLowerCase();
+
+    $('again').onclick = () => send({t: 'reset'});
+    connect();
+</script>
+</body>
+</html>
