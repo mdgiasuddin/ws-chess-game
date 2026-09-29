@@ -19,12 +19,12 @@ public class ChessRoom {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final ChessEngine engine = new ChessEngine();
-    private final WebSocketSession[] seats = new WebSocketSession[2]; // 0 = WHITE, 1 = BLACK
+    private final WebSocketSession[] sessions = new WebSocketSession[2]; // 0 = WHITE, 1 = BLACK
     private boolean closed;
 
     public ChessRoom(WebSocketSession white, WebSocketSession black) {
-        seats[0] = white;
-        seats[1] = black;
+        sessions[0] = white;
+        sessions[1] = black;
         send(0, "{\"t\":\"welcome\",\"color\":\"WHITE\"}");
         send(1, "{\"t\":\"welcome\",\"color\":\"BLACK\"}");
         broadcastState();
@@ -96,9 +96,9 @@ public class ChessRoom {
     }
 
     private void send(int seat, String msg) {
-        WebSocketSession s = seats[seat];
+        WebSocketSession session = sessions[seat];
         try {
-            if (s != null && s.isOpen()) s.sendMessage(new TextMessage(msg));
+            if (session != null && session.isOpen()) session.sendMessage(new TextMessage(msg));
         } catch (Exception e) {
             log.debug("Send to seat {} failed: {}", seat, e.toString());
         }

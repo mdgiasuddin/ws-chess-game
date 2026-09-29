@@ -21,7 +21,7 @@ public class ChessEngine {
             "rnbqkbnr", "pppppppp", "........", "........",
             "........", "........", "PPPPPPPP", "RNBQKBNR"};
 
-    private final char[][] b = new char[8][8];
+    private final char[][] board = new char[8][8];
     private boolean whiteTurn;
     private boolean wKingMoved, wRookAMoved, wRookHMoved, bKingMoved, bRookAMoved, bRookHMoved;
     private Status status;
@@ -33,7 +33,7 @@ public class ChessEngine {
     }
 
     public void reset() {
-        for (int r = 0; r < 8; r++) b[r] = START[r].toCharArray();
+        for (int r = 0; r < 8; r++) board[r] = START[r].toCharArray();
         whiteTurn = true;
         wKingMoved = wRookAMoved = wRookHMoved = bKingMoved = bRookAMoved = bRookHMoved = false;
         status = NORMAL;
@@ -64,7 +64,7 @@ public class ChessEngine {
 
     public List<String> rows() {
         List<String> rows = new ArrayList<>();
-        for (char[] row : b) rows.add(new String(row));
+        for (char[] row : board) rows.add(new String(row));
         return rows;
     }
 
@@ -78,25 +78,25 @@ public class ChessEngine {
         if (white != whiteTurn) return "Wait for your opponent's move.";
         if (outside(sr, sc) || outside(tr, tc)) return "Invalid move.";
 
-        char p = b[sr][sc];
+        char p = board[sr][sc];
         if (p == '.' || isWhite(p) != white) return "Select one of your pieces.";
         if (!valid(sr, sc, tr, tc)) return "Invalid move.";
         if (leavesKingInCheck(sr, sc, tr, tc, white)) return "Illegal move! Your king would be in check.";
 
         boolean castling = Character.toLowerCase(p) == 'k' && sr == tr && Math.abs(sc - tc) == 2;
-        b[tr][tc] = p;
-        b[sr][sc] = '.';
+        board[tr][tc] = p;
+        board[sr][sc] = '.';
         if (castling) {
             if (tc > sc) {
-                b[sr][5] = b[sr][7];
-                b[sr][7] = '.';
+                board[sr][5] = board[sr][7];
+                board[sr][7] = '.';
             } else {
-                b[sr][3] = b[sr][0];
-                b[sr][0] = '.';
+                board[sr][3] = board[sr][0];
+                board[sr][0] = '.';
             }
         }
-        if (p == 'P' && tr == 0) b[tr][tc] = 'Q';
-        else if (p == 'p' && tr == 7) b[tr][tc] = 'q';
+        if (p == 'P' && tr == 0) board[tr][tc] = 'Q';
+        else if (p == 'p' && tr == 7) board[tr][tc] = 'q';
 
         updateMovedFlags(p, sr, sc);
         lastMove = new int[]{sr, sc, tr, tc};
@@ -121,7 +121,7 @@ public class ChessEngine {
 
     private boolean valid(int sr, int sc, int tr, int tc) {
         if (outside(sr, sc) || outside(tr, tc) || (sr == tr && sc == tc)) return false;
-        char p = b[sr][sc], t = b[tr][tc];
+        char p = board[sr][sc], t = board[tr][tc];
         if (p == '.') return false;
         if (t != '.' && isWhite(t) == isWhite(p)) return false;
         return switch (Character.toLowerCase(p)) {
@@ -151,16 +151,17 @@ public class ChessEngine {
     private boolean pathClear(int sr, int sc, int tr, int tc) {
         int rs = Integer.compare(tr, sr), cs = Integer.compare(tc, sc);
         for (int r = sr + rs, c = sc + cs; r != tr || c != tc; r += rs, c += cs) {
-            if (b[r][c] != '.') return false;
+            if (board[r][c] != '.') return false;
         }
         return true;
     }
 
     private boolean pawnMove(int sr, int sc, int tr, int tc, boolean white) {
         int dir = white ? -1 : 1, startRow = white ? 6 : 1;
-        char target = b[tr][tc];
+        char target = board[tr][tc];
         if (sc == tc && tr == sr + dir && target == '.') return true;
-        if (sc == tc && sr == startRow && tr == sr + 2 * dir && target == '.' && b[sr + dir][sc] == '.') return true;
+        if (sc == tc && sr == startRow && tr == sr + 2 * dir && target == '.' && board[sr + dir][sc] == '.')
+            return true;
         return Math.abs(sc - tc) == 1 && tr == sr + dir && target != '.' && isWhite(target) != white;
     }
 
@@ -174,8 +175,8 @@ public class ChessEngine {
         if (kingSide ? (white ? wRookHMoved : bRookHMoved) : (white ? wRookAMoved : bRookAMoved)) return false;
 
         int rookCol = kingSide ? 7 : 0, step = kingSide ? 1 : -1;
-        if (b[sr][rookCol] != (white ? 'R' : 'r')) return false;
-        for (int c = sc + step; c != rookCol; c += step) if (b[sr][c] != '.') return false;
+        if (board[sr][rookCol] != (white ? 'R' : 'r')) return false;
+        for (int c = sc + step; c != rookCol; c += step) if (board[sr][c] != '.') return false;
 
         if (kingInCheck(white)) return false;                            // cannot castle out of check
         if (leavesKingInCheck(sr, sc, sr, sc + step, white)) return false; // ...through check
@@ -187,7 +188,7 @@ public class ChessEngine {
         int kr = -1, kc = -1;
         for (int r = 0; r < 8 && kr < 0; r++)
             for (int c = 0; c < 8; c++)
-                if (b[r][c] == king) {
+                if (board[r][c] == king) {
                     kr = r;
                     kc = c;
                     break;
@@ -195,26 +196,26 @@ public class ChessEngine {
         if (kr < 0) return true;
         for (int r = 0; r < 8; r++)
             for (int c = 0; c < 8; c++) {
-                char p = b[r][c];
+                char p = board[r][c];
                 if (p != '.' && isWhite(p) != white && attacks(p, r, c, kr, kc)) return true;
             }
         return false;
     }
 
     private boolean leavesKingInCheck(int sr, int sc, int tr, int tc, boolean white) {
-        char moving = b[sr][sc], captured = b[tr][tc];
-        b[tr][tc] = moving;
-        b[sr][sc] = '.';
+        char moving = board[sr][sc], captured = board[tr][tc];
+        board[tr][tc] = moving;
+        board[sr][sc] = '.';
         boolean check = kingInCheck(white);
-        b[sr][sc] = moving;
-        b[tr][tc] = captured;
+        board[sr][sc] = moving;
+        board[tr][tc] = captured;
         return check;
     }
 
     private boolean anyLegalMove(boolean white) {
         for (int sr = 0; sr < 8; sr++)
             for (int sc = 0; sc < 8; sc++) {
-                char p = b[sr][sc];
+                char p = board[sr][sc];
                 if (p == '.' || isWhite(p) != white) continue;
                 for (int tr = 0; tr < 8; tr++)
                     for (int tc = 0; tc < 8; tc++)
