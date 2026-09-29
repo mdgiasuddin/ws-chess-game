@@ -14,7 +14,7 @@ public class ChessHandler extends TextWebSocketHandler {
 
     private final Object lock = new Object();
     private WebSocketSession waiting;
-    private final Map<String, Seat> seats = new ConcurrentHashMap<>();
+    private final Map<String, Seat> seatMap = new ConcurrentHashMap<>();
 
     @Override
     public void afterConnectionEstablished(@NonNull WebSocketSession raw) throws Exception {
@@ -30,15 +30,15 @@ public class ChessHandler extends TextWebSocketHandler {
             WebSocketSession white = waiting;
             waiting = null;
             ChessRoom room = new ChessRoom(white, session);
-            seats.put(white.getId(), new Seat(room, 0));
-            seats.put(session.getId(), new Seat(room, 1));
+            seatMap.put(white.getId(), new Seat(room, 0));
+            seatMap.put(session.getId(), new Seat(room, 1));
         }
     }
 
     @Override
     protected void handleTextMessage(WebSocketSession raw, @NonNull TextMessage message) {
-        Seat s = seats.get(raw.getId());
-        if (s != null) s.room().handle(s.seat(), message.getPayload());
+        Seat seat = seatMap.get(raw.getId());
+        if (seat != null) seat.room().handle(seat.seatId(), message.getPayload());
     }
 
     @Override
@@ -46,10 +46,10 @@ public class ChessHandler extends TextWebSocketHandler {
         synchronized (lock) {
             if (waiting != null && waiting.getId().equals(raw.getId())) waiting = null;
         }
-        Seat s = seats.remove(raw.getId());
-        if (s != null) {
-            s.room().close(s.seat());
-            seats.values().removeIf(other -> other.room() == s.room());
+        Seat seat = seatMap.remove(raw.getId());
+        if (seat != null) {
+            seat.room().close(seat.seatId());
+            seatMap.values().removeIf(other -> other.room() == seat.room());
         }
     }
 }

@@ -61,7 +61,7 @@ public class ChessRoom {
                 }
             }
         } catch (Exception e) {
-            log.warn("Bad message from seat {}: {}", seat, e.toString());
+            log.warn("Bad message from seatId {}: {}", seat, e.toString());
         }
     }
 
@@ -100,7 +100,7 @@ public class ChessRoom {
         try {
             if (session != null && session.isOpen()) session.sendMessage(new TextMessage(msg));
         } catch (Exception e) {
-            log.debug("Send to seat {} failed: {}", seat, e.toString());
+            log.debug("Send to seatId {} failed: {}", seat, e.toString());
         }
     }
 }
