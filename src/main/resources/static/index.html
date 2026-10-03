@@ -103,7 +103,6 @@
         }
 
         button {
-            display: none;
             background: #e94560;
             color: #fff;
             border: 0;
@@ -112,25 +111,136 @@
             font-size: 15px;
             cursor: pointer;
         }
+
+        #again {
+            display: none;
+        }
+
+        #lobby {
+            width: min(360px, 90vw);
+            background: #16213e;
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+        }
+
+        #lobby h1 {
+            margin: 0 0 6px;
+            font-size: 22px;
+        }
+
+        #lobby p {
+            margin: 0 0 18px;
+            color: #8f98b8;
+            font-size: 12px;
+        }
+
+        #lobby .codeRow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        #lobby #genCode {
+            font-size: 26px;
+            font-weight: 700;
+            letter-spacing: 6px;
+            background: #0f1631;
+            border: 1px solid #39456b;
+            border-radius: 8px;
+            padding: 10px 16px;
+        }
+
+        #lobby #refreshBtn {
+            padding: 10px 14px;
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        #lobby #joinBtn {
+            width: 100%;
+        }
+
+        #lobby #lobbyMsg {
+            color: #ff8a8a;
+            font-size: 13px;
+            min-height: 16px;
+            margin-top: 10px;
+        }
+
+        #roomBar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #16213e;
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: 13px;
+            color: #c9d1e8;
+        }
+
+        #roomBar b {
+            letter-spacing: 2px;
+            color: #fff;
+        }
+
+        #game {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+        }
     </style>
 </head>
 <body>
-<div id="status">Connecting to server...</div>
-<div id="board"></div>
-<button id="again">Play again</button>
+
+<div id="lobby">
+    <h1>Networked Chess</h1>
+    <p>Share this code with a friend, or refresh for a new one.</p>
+    <div class="codeRow">
+        <span id="genCode"></span>
+        <button id="refreshBtn" title="Get a new code">&#x21bb;</button>
+    </div>
+    <button id="joinBtn">Join</button>
+    <div id="lobbyMsg"></div>
+</div>
+
+<div id="game">
+    <div id="roomBar">
+        Room code: <b id="roomCode"></b>
+    </div>
+    <div id="status">Connecting...</div>
+    <div id="board"></div>
+    <button id="again">Play again</button>
+</div>
 
 <script>
     // Server sends pieces as letters (uppercase = White). Filled glyphs are used for both sides and
     // coloured with CSS; U+FE0E forces text (not emoji) rendering of the pawn.
     const GLYPH = {k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟\uFE0E'};
     const $ = id => document.getElementById(id);
-    let ws, color = null, S = null;
+    let ws, color = null, S = null, roomCode = null;
     let sel = null, oppSel = null, notice = null;
 
-    function connect() {
-        ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chess');
+    // Unambiguous charset: no 0/O or 1/I, so a code read aloud or handwritten can't be misheard.
+    const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const genCode = () => Array.from({length: 5}, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+    const sanitize = s => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
+
+    function connect(code) {
+        roomCode = code;
+        $('roomCode').textContent = code;
+        $('lobby').style.display = 'none';
+        $('game').style.display = 'flex';
+
+        ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host
+            + '/ws/chess?room=' + encodeURIComponent(code));
         ws.onopen = () => setStatus('Waiting for an opponent...', '');
-        ws.onclose = () => setStatus('Disconnected - reload to reconnect', 'over');
+        ws.onclose = () => {
+            if (S) setStatus('Disconnected - reload to reconnect', 'over');
+        };
         ws.onmessage = ev => {
             const m = JSON.parse(ev.data);
             switch (m.t) {
@@ -139,7 +249,7 @@
                     render();
                     break;
                 case 'wait':
-                    setStatus('Waiting for an opponent...', '');
+                    setStatus('Waiting for an opponent to join with this code...', '');
                     break;
                 case 'left':
                     S = S && {...S, status: 'LEFT'};
@@ -155,8 +265,16 @@
                     render();
                     break;
                 case 'error':
-                    notice = m.msg;
-                    render();
+                    // Before a game exists (bad/full room code) there's no board to render onto,
+                    // so show the problem directly and return to the lobby instead of calling render().
+                    if (!S) {
+                        $('game').style.display = 'none';
+                        $('lobby').style.display = 'block';
+                        $('lobbyMsg').textContent = m.msg;
+                    } else {
+                        notice = m.msg;
+                        render();
+                    }
                     break;
             }
         };
@@ -167,6 +285,26 @@
         $('status').textContent = t;
         $('status').className = cls;
     };
+
+    // ---------------------------------------------------------------- lobby
+    // No typing: a code is generated as soon as the lobby loads. Refresh swaps it for a new one;
+    // Join connects with whatever code is currently shown (this becomes the match's code - the
+    // friend joins the same match by opening the link copied from the room bar once connected).
+    let lobbyCode = genCode();
+    $('genCode').textContent = lobbyCode;
+
+    $('refreshBtn').onclick = () => {
+        lobbyCode = genCode();
+        $('genCode').textContent = lobbyCode;
+        $('lobbyMsg').textContent = '';
+    };
+    $('joinBtn').onclick = () => {
+        history.replaceState(null, '', '?room=' + lobbyCode);
+        connect(lobbyCode);
+    };
+    // A link with ?room=CODE joins that game directly; otherwise show the lobby.
+    const urlCode = sanitize(new URLSearchParams(location.search).get('room'));
+    if (urlCode) connect(urlCode);
 
     const pieceAt = (r, c) => S.board[r][c];
     const isMine = ch => ch !== '.' && (ch === ch.toUpperCase()) === (color === 'WHITE');
@@ -258,7 +396,6 @@
     const cap = s => s.charAt(0) + s.slice(1).toLowerCase();
 
     $('again').onclick = () => send({t: 'reset'});
-    connect();
 </script>
 </body>
 </html>
