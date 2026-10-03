@@ -7,13 +7,32 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Pairs connections by room code instead of arrival order: the ?room=CODE query parameter on the
+ * WebSocket handshake identifies the match, so two friends who use the same code find each other
+ * regardless of who else is connecting to the server at the same time.
+ */
 public class ChessHandler extends TextWebSocketHandler {
 
+    private static final int MAX_CODE_LEN = 20;
+
     private final Object lock = new Object();
-    private WebSocketSession waiting;
+    /**
+     * code -> the first player waiting under that code.
+     */
+    private final Map<String, WebSocketSession> waitingByCode = new ConcurrentHashMap<>();
+    /**
+     * codes with a match already in progress, so a third connection can't join it.
+     */
+    private final Set<String> activeCodes = ConcurrentHashMap.newKeySet();
     private final Map<String, Seat> seatMap = new ConcurrentHashMap<>();
 
     @Override
@@ -21,14 +40,33 @@ public class ChessHandler extends TextWebSocketHandler {
         // Serialises sends so two threads can never write to one session at once.
         WebSocketSession session = new ConcurrentWebSocketSessionDecorator(raw, 5000, 512 * 1024);
 
+        String code = extractCode(raw.getUri());
+        if (code == null) {
+            session.sendMessage(new TextMessage("{\"t\":\"error\",\"msg\":\"Missing or invalid room code.\"}"));
+            session.close(CloseStatus.BAD_DATA);
+            return;
+        }
+        // Stashed on the raw session (not the Seat) so afterConnectionClosed can free the code
+        // for both a player who never got paired and one who was mid-game.
+        raw.getAttributes().put("roomCode", code);
+
         synchronized (lock) {
-            if (waiting == null) {
-                waiting = session;
-                session.sendMessage(new TextMessage("{\"t\":\"wait\"}"));
+            if (activeCodes.contains(code)) {
+                session.sendMessage(new TextMessage(
+                        "{\"t\":\"error\",\"msg\":\"That room code is already in use by two players.\"}"));
+                session.close(CloseStatus.NORMAL);
                 return;
             }
-            WebSocketSession white = waiting;
-            waiting = null;
+
+            WebSocketSession white = waitingByCode.get(code);
+            if (white == null) {
+                waitingByCode.put(code, session);
+                session.sendMessage(new TextMessage("{\"t\":\"wait\",\"code\":\"" + code + "\"}"));
+                return;
+            }
+
+            waitingByCode.remove(code);
+            activeCodes.add(code);
             ChessRoom room = new ChessRoom(white, session);
             seatMap.put(white.getId(), new Seat(room, 0));
             seatMap.put(session.getId(), new Seat(room, 1));
@@ -43,13 +81,36 @@ public class ChessHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(@NonNull WebSocketSession raw, @NonNull CloseStatus status) {
+        String code = (String) raw.getAttributes().get("roomCode");
+
         synchronized (lock) {
-            if (waiting != null && waiting.getId().equals(raw.getId())) waiting = null;
+            WebSocketSession w = code == null ? null : waitingByCode.get(code);
+            if (w != null && w.getId().equals(raw.getId())) {
+                waitingByCode.remove(code);
+            }
         }
+
         Seat seat = seatMap.remove(raw.getId());
         if (seat != null) {
             seat.room().close(seat.seatId());
             seatMap.values().removeIf(other -> other.room() == seat.room());
+            if (code != null) activeCodes.remove(code);   // free the code so it can be reused later
         }
+    }
+
+    /**
+     * Reads ?room=CODE from the handshake URL, keeping only A-Z0-9 and capping the length.
+     */
+    private static String extractCode(URI uri) {
+        if (uri == null || uri.getQuery() == null) return null;
+        for (String param : uri.getQuery().split("&")) {
+            int eq = param.indexOf('=');
+            if (eq < 0 || !"room".equals(param.substring(0, eq))) continue;
+            String decoded = URLDecoder.decode(param.substring(eq + 1), StandardCharsets.UTF_8);
+            String cleaned = decoded.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "");
+            if (cleaned.isEmpty()) return null;
+            return cleaned.length() > MAX_CODE_LEN ? cleaned.substring(0, MAX_CODE_LEN) : cleaned;
+        }
+        return null;
     }
 }
